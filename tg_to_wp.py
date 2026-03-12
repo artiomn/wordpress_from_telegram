@@ -20,6 +20,7 @@ class WordPressImporter:
         self._existing_posts = []
         self._client = self._make_wordpress_client(wp_url, user, password)
         self._cached_tags = dict()
+        self._categories = self._client.categories.list()
 
         if skip_existing:
             # Filenames after TG export are unique
@@ -60,7 +61,8 @@ class WordPressImporter:
 
             return media
 
-    def upload_post(self, title: str, text: str, tags: set[str] | None = None, post_type: str = 'draft') -> bool:
+    def upload_post(self, title: str, text: str, tags: set[str] | None = None,
+                    post_type: str = 'draft', category: str = '') -> bool:
         """
         :post_type can be: publish, future, draft, pending, private.
         """
@@ -78,13 +80,17 @@ class WordPressImporter:
         else:
             tags_ids = None
 
+        category_ids = [cat['id'] for cat in self._categories if cat['slug'] == category or cat['name'] == category] \
+            if category else None
+
         logging.info(f'Creating post "%s"...', title)
         # Create a new post
         new_post = self._client.posts.create(
             title=title,
             content=text,
             status=post_type,
-            tags=tags_ids
+            tags=tags_ids,
+            categories=category_ids
         )
 
         return True
@@ -238,7 +244,7 @@ class HybridTitleGetter:
 
 
 def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_getter,
-                           max_posts_count: int = -1, unite_empty: bool = True):
+                           max_posts_count: int = -1, unite_empty: bool = True, category: str = ''):
     posts_count = 0
 
     for msg in tg_processor.load_messages(result_filename, unite_empty):
@@ -254,7 +260,7 @@ def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_get
             add_text.append(f'{tl_data}\n')
 
         new_text = f'{"\n".join(add_text)}\n{msg["text"]}' if add_text else msg['text']
-        if wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags']):
+        if wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags'], category=category):
             # Skipped posts don't counted.
             posts_count += 1
 
@@ -264,6 +270,7 @@ if '__main__' == __name__:
     parser.add_argument('wp_host', default='https://www.optimamechanica.com', help='WordPress host')
     parser.add_argument('--user', default='admin', help='User login')
     parser.add_argument('--app-key', default='', help='Application key')
+    parser.add_argument('--category', default='', help='Category to publish posts')
     parser.add_argument('--use-ai', action='store_true', help='Use AI to create title')
     parser.add_argument('--skip-existing-posts', action='store_true',
                         help='Don\'t add post if it already exists (only titles compared)')
@@ -280,5 +287,5 @@ if '__main__' == __name__:
     wp_importer = WordPressImporter(args.wp_host, args.user, args.app_key, skip_existing=args.skip_existing_posts)
 
     post_tg_messages_to_wp(tg_proc, wp_importer, args.tg_result_file, title_getter,
-                           args.maximum_posts_count, args.unite_empty_messages)
+                           args.maximum_posts_count, args.unite_empty_messages, args.category)
 
