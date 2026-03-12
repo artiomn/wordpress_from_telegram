@@ -1,0 +1,4 @@
+python-magic==0.4.27
+wp-api-client==0.1.0
+# Optional.
+g4f==7.3.0
