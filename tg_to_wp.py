@@ -62,7 +62,7 @@ class WordPressImporter:
             return media
 
     def upload_post(self, title: str, text: str, tags: set[str] | None = None,
-                    post_type: str = 'draft', category: str = '') -> bool:
+                    post_type: str = 'draft', category: str = '', featured_media: int = -1) -> bool:
         """
         :post_type can be: publish, future, draft, pending, private.
         """
@@ -84,13 +84,17 @@ class WordPressImporter:
             if category else None
 
         logging.info(f'Creating post "%s"...', title)
+        if featured_media < 0:
+            featured_media = None
+
         # Create a new post
         new_post = self._client.posts.create(
             title=title,
             content=text,
             status=post_type,
             tags=tags_ids,
-            categories=category_ids
+            categories=category_ids,
+            featured_media=featured_media
         )
 
         return True
@@ -252,15 +256,21 @@ def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_get
             break
 
         add_text = []
+        image_id = -1
+
         for media_file in msg['files']:
             file_path = Path(media_file.get('file', media_file.get('photo')))
             logging.info(f'Uploading file "%s"...', file_path.name)
             uploaded_data = wp_importer.upload_file(file_path)
+            if 'photo' in media_file.keys() and -1 == image_id:
+                # Get first image.
+                image_id = uploaded_data['id']
             tl_data = uploaded_data['description']['rendered']
             add_text.append(f'{tl_data}\n')
 
         new_text = f'{"\n".join(add_text)}\n{msg["text"]}' if add_text else msg['text']
-        if wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags'], category=category):
+        if wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags'], category=category,
+                                   featured_media=image_id):
             # Skipped posts don't counted.
             posts_count += 1
 
