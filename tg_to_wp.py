@@ -276,6 +276,8 @@ def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_get
 
         logging.info('Published %d posts.', posts_count)
 
+    logging.info('Publish finished.')
+
 
 if '__main__' == __name__:
     parser = argparse.ArgumentParser(description='Telegram to WordPress importer')
