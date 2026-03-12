@@ -39,6 +39,7 @@ class WordPressImporter:
         for tag in tags:
             if tag not in old_tags:
                 self._client.tags.create(name=tag)
+                self._cached_tags = dict()
 
     def upload_file(self, filename: Path):
         if self._skip_existing and filename.name in self._media_items.keys():
@@ -226,7 +227,10 @@ def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_get
             elif 'file' in media_file.keys():
                 file_type = media_file.get('mime_type', '')
                 if file_type.startswith('video'):
-                    add_text.append(f'<video src="{uploaded_data["source_url"]}"/>\n')
+                    add_text.append(f'<video controls width="600"><source src="{uploaded_data["source_url"]}"'
+                                     ' type="video/mp4">\n'
+                                     'Your browser does not support the video tag.</video>\n')
+
             else:
                 add_text.append(f'<a href="{uploaded_data["source_url"]}"/>\n')
 
