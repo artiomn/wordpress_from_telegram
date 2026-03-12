@@ -22,10 +22,10 @@ class WordPressImporter:
         self._cached_tags = dict()
 
         if skip_existing:
-            # Filenames after TG export are unique.
+            # Filenames after TG export are unique
             self._media_items = {Path(mi['guid']['rendered']).name: mi for mi in self._client.media.list()}
             self._existing_posts = [(post['title']['rendered'], post['content']['rendered'])
-                                    for post in self._client.posts.list()] # status='publish'
+                                    for post in self._client.posts.list(status=['publish', 'draft'])]
 
     @property
     def tags(self):
@@ -63,7 +63,7 @@ class WordPressImporter:
         if self._skip_existing:
             # Get all published posts.
             for e_title, e_text in self._existing_posts:
-                if e_title == title and e_text == text:
+                if e_title == title: # and e_text == text:
                     return
 
         if tags is not None:
@@ -109,8 +109,6 @@ class TGProcessor:
 
         if 'plain' == te_type:
             text = te['text']
-        elif 'textlink' == te_type:
-            text = f'<a href={te["href"]}>{te["text"]}</a>'
         elif 'bold' == te_type:
             text = f'<b>{te["text"]}</b>'
         elif 'italic' == te_type:
@@ -121,8 +119,10 @@ class TGProcessor:
             text = f'<s>{te["text"]}</s>'
         elif 'pre' == te_type:
             text = f'<pre>{te["text"]}</pre>'
+        elif 'link' == te_type:
+            text = f'<a href="{te["text"]}">{te["text"]}</a>'
         elif 'text_link' == te_type:
-            text = f'<a href={te["href"]}>{te["text"]}</s>'
+            text = f'<a href="{te["href"]}">{te["text"]}</a>'
         elif 'hashtag' == te_type:
             tag = te['text'].replace('#', '')
             self._tags.add(tag)
@@ -209,29 +209,31 @@ def simple_title_getter(text: str) -> str:
     return 'no title'
 
 
-def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_getter):
-    i = 0
+def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_getter,
+                           max_posts_count: int = -1, unite_empty: bool = True):
+    posts_count = 0
 
-    for msg in tg_processor.load_messages(result_filename):
+    for msg in tg_processor.load_messages(result_filename, unite_empty):
+        if max_posts_count > 0 and posts_count >= max_posts_count:
+            break
+
         add_text = []
         for media_file in msg['files']:
             uploaded_data = wp_importer.upload_file(Path(media_file.get('file', media_file.get('photo'))))
             if 'photo' in media_file.keys():
-                add_text.append(f'<img src={uploaded_data["source_url"]}/>\n')
+                tl_url = uploaded_data["media_details"]["sizes"]["thumbnail"]["source_url"]
+                add_text.append(f'<a href="{uploaded_data["source_url"]}"><img src="{tl_url}"/></a>\n')
             elif 'file' in media_file.keys():
                 file_type = media_file.get('mime_type', '')
                 if file_type.startswith('video'):
-                    add_text.append(f'<video src={uploaded_data["source_url"]}/>\n')
+                    add_text.append(f'<video src="{uploaded_data["source_url"]}"/>\n')
             else:
-                add_text.append(f'<a href={uploaded_data["source_url"]}/>\n')
+                add_text.append(f'<a href="{uploaded_data["source_url"]}"/>\n')
 
         new_text = f'{"\n".join(add_text)}\n{msg["text"]}' if add_text else msg['text']
         wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags'])
 
-        if i == 2:
-            break
-
-        i += 1
+        posts_count += 1
 
 
 if '__main__' == __name__:
@@ -241,16 +243,18 @@ if '__main__' == __name__:
     parser.add_argument('--app-key', default='', help='Application key')
     parser.add_argument('--use-ai', action='store_true', help='Use AI to create title')
     parser.add_argument('--skip-existing-posts', action='store_true',
-                        help='Don\'t add post if it already exists')
+                        help='Don\'t add post if it already exists (only titles compared)')
+    parser.add_argument('--maximum-posts-count', type=int, default=-1, help='Maximum posts count to publish')
     parser.add_argument('--tg-result-file', default='result.json', help='File exported from Telegram')
     parser.add_argument('--unite-empty-messages', action='store_true', help='Unite TG messages without text')
 
     args = parser.parse_args()
 
-    title_getter = AITitleGetter(Client()) if args.use_ai else simple_title_getter
+    title_getter = AITitleGetter() if args.use_ai else simple_title_getter
 
     tg_proc = TGProcessor()
     wp_importer = WordPressImporter(args.wp_host, args.user, args.app_key, skip_existing=args.skip_existing_posts)
 
-    post_tg_messages_to_wp(tg_proc, wp_importer, args.tg_result_file, title_getter)
+    post_tg_messages_to_wp(tg_proc, wp_importer, args.tg_result_file, title_getter,
+                           args.maximum_posts_count, args.unite_empty_messages)
 
