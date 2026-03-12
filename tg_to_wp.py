@@ -217,9 +217,9 @@ class AITitleGetter:
             model='',
             # stream=False,
             messages=[{'role': 'user',
-                       'content': 'Make title from text. '
-                       'Print only plain titles in text language no more 10 words length'
-                       'Make titles without line breaks and special characters.'},
+                       'content': 'Make plain text title from the post. '
+                       'Print only plain titles in the language of the original post. '
+                       'Make titles no more than 7 words without line breaks and special characters.'},
                       {'role': 'user', 'content': text}]
         )
 
@@ -273,6 +273,8 @@ def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_get
                                    featured_media=image_id):
             # Skipped posts don't counted.
             posts_count += 1
+
+        logging.info('Published %d posts.', posts_count)
 
 
 if '__main__' == __name__:
