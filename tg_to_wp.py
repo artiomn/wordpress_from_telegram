@@ -198,7 +198,8 @@ class AITitleGetter:
                         'content': 'Make title from text. Print only titles in the text language without decoration.'},
                         {'role': 'user', 'content': text}]
         )
-        return response.choices[0].message.content
+
+        return re.sub('<.*>', '', response.choices[0].message.content)
 
 
 def simple_title_getter(text: str) -> str:
