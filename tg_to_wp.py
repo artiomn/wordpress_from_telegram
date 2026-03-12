@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-from g4f.client import Client
 import logging
 from wp_api import WPClient
 from wp_api.auth import ApplicationPasswordAuth, BasicAuth
@@ -61,7 +60,7 @@ class WordPressImporter:
 
             return media
 
-    def upload_post(self, title: str, text: str, tags: set[str] | None = None, post_type: str = 'draft'):
+    def upload_post(self, title: str, text: str, tags: set[str] | None = None, post_type: str = 'draft') -> bool:
         """
         :post_type can be: publish, future, draft, pending, private.
         """
@@ -70,7 +69,8 @@ class WordPressImporter:
             # Get all published posts.
             for e_title, e_text in self._existing_posts:
                 if e_title == title: # and e_text == text:
-                    return
+                    logging.info(f'Skipping post "%s"...', title)
+                    return False
 
         if tags is not None:
             self.add_tags(tags)
@@ -78,6 +78,7 @@ class WordPressImporter:
         else:
             tags_ids = None
 
+        logging.info(f'Creating post "%s"...', title)
         # Create a new post
         new_post = self._client.posts.create(
             title=title,
@@ -85,6 +86,8 @@ class WordPressImporter:
             status=post_type,
             tags=tags_ids
         )
+
+        return True
 
     @staticmethod
     def _make_wordpress_client(wp_url: str, user: str, password: str) -> WPClient:
@@ -134,11 +137,12 @@ class TGProcessor:
             self._tags.add(tag)
             tags.add(tag)
         else:
-            text = te["text"]
+            text = te['text']
 
         return re.sub(r'\n', '<br>\n', text), tags
 
     def load_messages(self, path_to_json, unite_messages_without_text: bool = True):
+        logging.info('Processing "%s"', path_to_json)
         with open(path_to_json, 'rt', encoding='utf-8') as msg_dump:
             result = {
                 'tags': set(),
@@ -189,10 +193,13 @@ class TGProcessor:
 
             if result['text'] or result['files']:
                 yield result
+        logging.info('Processing "%s" finished.', path_to_json)
 
 
 class AITitleGetter:
     def __init__(self):
+        # Optional requirement.
+        from g4f.client import Client
         self._client = Client()
 
     def __call__(self, text: str) -> str:
@@ -200,7 +207,9 @@ class AITitleGetter:
             model='',
             # stream=False,
             messages=[{'role': 'user',
-                       'content': 'Make title from text. Print only plain titles in text language no more 10 words length.'},
+                       'content': 'Make title from text. '
+                       'Print only plain titles in text language no more 10 words length'
+                       'Make titles without line breaks and special characters.'},
                       {'role': 'user', 'content': text}]
         )
 
@@ -238,24 +247,16 @@ def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_get
 
         add_text = []
         for media_file in msg['files']:
-            uploaded_data = wp_importer.upload_file(Path(media_file.get('file', media_file.get('photo'))))
-            if 'photo' in media_file.keys():
-                tl_url = uploaded_data["media_details"]["sizes"]["thumbnail"]["source_url"]
-                add_text.append(f'<a href="{uploaded_data["source_url"]}"><img src="{tl_url}"/></a>\n')
-            elif 'file' in media_file.keys():
-                file_type = media_file.get('mime_type', '')
-                if file_type.startswith('video'):
-                    add_text.append(f'<video controls width="600"><source src="{uploaded_data["source_url"]}"'
-                                     ' type="video/mp4">\n'
-                                     'Your browser does not support the video tag.</video>\n')
-
-            else:
-                add_text.append(f'<a href="{uploaded_data["source_url"]}"/>\n')
+            file_path = Path(media_file.get('file', media_file.get('photo')))
+            logging.info(f'Uploading file "%s"...', file_path.name)
+            uploaded_data = wp_importer.upload_file(file_path)
+            tl_data = uploaded_data['description']['rendered']
+            add_text.append(f'{tl_data}\n')
 
         new_text = f'{"\n".join(add_text)}\n{msg["text"]}' if add_text else msg['text']
-        wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags'])
-
-        posts_count += 1
+        if wp_importer.upload_post(title_getter(msg['text']), new_text, tags=msg['tags']):
+            # Skipped posts don't counted.
+            posts_count += 1
 
 
 if '__main__' == __name__:
@@ -272,6 +273,7 @@ if '__main__' == __name__:
 
     args = parser.parse_args()
 
+    logging.basicConfig(level=logging.INFO)
     title_getter = HybridTitleGetter() if args.use_ai else simple_title_getter
 
     tg_proc = TGProcessor()
