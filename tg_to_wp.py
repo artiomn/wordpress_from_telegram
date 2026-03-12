@@ -3,6 +3,7 @@
 
 import argparse
 from g4f.client import Client
+import logging
 from wp_api import WPClient
 from wp_api.auth import ApplicationPasswordAuth, BasicAuth
 from pathlib import Path
@@ -38,7 +39,11 @@ class WordPressImporter:
         old_tags = self.tags.values()
         for tag in tags:
             if tag not in old_tags:
-                self._client.tags.create(name=tag)
+                try:
+                    self._client.tags.create(name=tag)
+                except Exception as e:
+                    logging.warning(e)
+
                 self._cached_tags = dict()
 
     def upload_file(self, filename: Path):
@@ -195,8 +200,8 @@ class AITitleGetter:
             model='',
             # stream=False,
             messages=[{'role': 'user',
-                        'content': 'Make title from text. Print only titles in the text language without decoration.'},
-                        {'role': 'user', 'content': text}]
+                       'content': 'Make title from text. Print only plain titles in text language no more 10 words length.'},
+                      {'role': 'user', 'content': text}]
         )
 
         return re.sub('<.*>', '', response.choices[0].message.content)
@@ -209,6 +214,18 @@ def simple_title_getter(text: str) -> str:
             return line
 
     return 'no title'
+
+
+class HybridTitleGetter:
+    def __init__(self):
+        self._ai_getter = AITitleGetter()
+
+    def __call__(self, text: str):
+        try:
+            return self._ai_getter(text)
+        except Exception as e:
+            logging.warning(e)
+            return simple_title_getter(text)
 
 
 def post_tg_messages_to_wp(tg_processor, wp_importer, result_filename, title_getter,
@@ -255,7 +272,7 @@ if '__main__' == __name__:
 
     args = parser.parse_args()
 
-    title_getter = AITitleGetter() if args.use_ai else simple_title_getter
+    title_getter = HybridTitleGetter() if args.use_ai else simple_title_getter
 
     tg_proc = TGProcessor()
     wp_importer = WordPressImporter(args.wp_host, args.user, args.app_key, skip_existing=args.skip_existing_posts)
